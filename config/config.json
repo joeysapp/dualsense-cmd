@@ -1,0 +1,50 @@
+{
+  "name": "Default Configuration",
+  "poll_rate": 100,
+  "deadzone": 0.1,
+  "shell": {
+    "working_dir": null,
+    "env": {}
+  },
+  "buttons": {
+    "cross": {
+      "trigger": "press",
+      "command": "echo 'Cross pressed'"
+    },
+    "circle": {
+      "trigger": "press",
+      "command": "echo 'Circle pressed'"
+    },
+    "square": {
+      "trigger": "press",
+      "command": "echo 'Square pressed'"
+    },
+    "triangle": {
+      "trigger": "press",
+      "command": "echo 'Triangle pressed'"
+    },
+    "dpad_up": {
+      "trigger": "press",
+      "command": "echo 'D-Pad Up'",
+      "debounce_ms": 150
+    },
+    "dpad_down": {
+      "trigger": "press",
+      "command": "echo 'D-Pad Down'",
+      "debounce_ms": 150
+    },
+    "dpad_left": {
+      "trigger": "press",
+      "command": "echo 'D-Pad Left'",
+      "debounce_ms": 150
+    },
+    "dpad_right": {
+      "trigger": "press",
+      "command": "echo 'D-Pad Right'",
+      "debounce_ms": 150
+    }
+  },
+  "led": {
+    "connected_color": { "r": 0, "g": 128, "b": 255 }
+  }
+}

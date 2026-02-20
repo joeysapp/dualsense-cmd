@@ -1,0 +1,95 @@
+{
+  "name": "Curl Commands Example",
+  "poll_rate": 60,
+  "deadzone": 0.15,
+  "shell": {
+    "env": {
+      "API_URL": "http://localhost:9700"
+    }
+  },
+  "buttons": {
+    "cross": {
+      "trigger": "press",
+      "command": "curl -s -X POST $API_URL/pen/down",
+      "rumble": {
+        "left": 30,
+        "right": 30,
+        "duration_ms": 50
+      }
+    },
+    "circle": {
+      "trigger": "press",
+      "command": "curl -s -X POST $API_URL/pen/up"
+    },
+    "triangle": {
+      "trigger": "press",
+      "command": "curl -s -X POST $API_URL/home"
+    },
+    "square": {
+      "trigger": "press",
+      "command": "curl -s -X GET $API_URL/status | jq ."
+    },
+    "dpad_up": {
+      "trigger": "hold",
+      "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": 0, \"dy\": -5, \"units\": \"mm\"}' $API_URL/move",
+      "debounce_ms": 100
+    },
+    "dpad_down": {
+      "trigger": "hold",
+      "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": 0, \"dy\": 5, \"units\": \"mm\"}' $API_URL/move",
+      "debounce_ms": 100
+    },
+    "dpad_left": {
+      "trigger": "hold",
+      "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": -5, \"dy\": 0, \"units\": \"mm\"}' $API_URL/move",
+      "debounce_ms": 100
+    },
+    "dpad_right": {
+      "trigger": "hold",
+      "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": 5, \"dy\": 0, \"units\": \"mm\"}' $API_URL/move",
+      "debounce_ms": 100
+    },
+    "l1": {
+      "trigger": "press",
+      "command": "curl -s -X GET $API_URL/info | jq .endpoints"
+    },
+    "r1": {
+      "trigger": "press",
+      "command": "curl -s -X GET $API_URL/health | jq ."
+    },
+    "options": {
+      "trigger": "press",
+      "command": "curl -s -X POST $API_URL/stop",
+      "rumble": {
+        "left": 255,
+        "right": 255,
+        "duration_ms": 200
+      },
+      "led": { "r": 255, "g": 0, "b": 0 }
+    }
+  },
+  "analog": {
+    "left_stick": {
+      "on_up": {
+        "trigger": "press",
+        "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": 0, \"dy\": -10, \"units\": \"mm\"}' $API_URL/move"
+      },
+      "on_down": {
+        "trigger": "press",
+        "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": 0, \"dy\": 10, \"units\": \"mm\"}' $API_URL/move"
+      },
+      "on_left": {
+        "trigger": "press",
+        "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": -10, \"dy\": 0, \"units\": \"mm\"}' $API_URL/move"
+      },
+      "on_right": {
+        "trigger": "press",
+        "command": "curl -s -X POST -H 'Content-Type: application/json' -d '{\"dx\": 10, \"dy\": 0, \"units\": \"mm\"}' $API_URL/move"
+      },
+      "threshold": 0.7
+    }
+  },
+  "led": {
+    "connected_color": { "r": 128, "g": 0, "b": 255 }
+  }
+}

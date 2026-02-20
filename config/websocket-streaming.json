@@ -1,0 +1,114 @@
+{
+  "name": "WebSocket Streaming (High Performance)",
+  "poll_rate": 120,
+  "deadzone": 0.05,
+  "websocket": {
+    "url": "ws://localhost:8080/controller",
+    "reconnect": true,
+    "reconnect_delay_ms": 1000,
+    "max_reconnect_attempts": 0,
+    "state_format": "{\"type\":\"state\",\"ts\":{{timestamp}},\"sticks\":{\"lx\":{{left_stick_x}},\"ly\":{{left_stick_y}},\"rx\":{{right_stick_x}},\"ry\":{{right_stick_y}}},\"triggers\":{\"l2\":{{l2_trigger}},\"r2\":{{r2_trigger}}},\"orientation\":{\"qw\":{{quat_w}},\"qx\":{{quat_x}},\"qy\":{{quat_y}},\"qz\":{{quat_z}}},\"euler\":{\"roll\":{{roll}},\"pitch\":{{pitch}},\"yaw\":{{yaw}}},\"gyro\":{\"x\":{{gyro_x}},\"y\":{{gyro_y}},\"z\":{{gyro_z}}},\"accel\":{\"x\":{{accel_x}},\"y\":{{accel_y}},\"z\":{{accel_z}}}}",
+    "state_interval_ms": 16,
+    "binary": false
+  },
+  "buttons": {
+    "cross": {
+      "trigger": "press",
+      "websocket": {
+        "message": "{\"type\":\"button\",\"button\":\"cross\",\"state\":\"pressed\"}",
+        "binary": false
+      }
+    },
+    "circle": {
+      "trigger": "press",
+      "websocket": {
+        "message": "{\"type\":\"button\",\"button\":\"circle\",\"state\":\"pressed\"}",
+        "binary": false
+      }
+    },
+    "square": {
+      "trigger": "press",
+      "websocket": {
+        "message": "{\"type\":\"button\",\"button\":\"square\",\"state\":\"pressed\"}",
+        "binary": false
+      }
+    },
+    "triangle": {
+      "trigger": "press",
+      "websocket": {
+        "message": "{\"type\":\"button\",\"button\":\"triangle\",\"state\":\"pressed\"}",
+        "binary": false
+      }
+    },
+    "l1": {
+      "trigger": "change",
+      "websocket": {
+        "message": "{\"type\":\"button\",\"button\":\"l1\",\"state\":\"{{#if l1}}pressed{{else}}released{{/if}}\"}",
+        "binary": false
+      }
+    },
+    "r1": {
+      "trigger": "change",
+      "websocket": {
+        "message": "{\"type\":\"button\",\"button\":\"r1\",\"state\":\"{{#if r1}}pressed{{else}}released{{/if}}\"}",
+        "binary": false
+      }
+    },
+    "dpad_up": {
+      "trigger": "change",
+      "websocket": {
+        "message": "{\"type\":\"dpad\",\"direction\":\"up\",\"state\":\"{{#if dpad_up}}pressed{{else}}released{{/if}}\"}",
+        "binary": false
+      }
+    },
+    "dpad_down": {
+      "trigger": "change",
+      "websocket": {
+        "message": "{\"type\":\"dpad\",\"direction\":\"down\",\"state\":\"{{#if dpad_down}}pressed{{else}}released{{/if}}\"}",
+        "binary": false
+      }
+    },
+    "dpad_left": {
+      "trigger": "change",
+      "websocket": {
+        "message": "{\"type\":\"dpad\",\"direction\":\"left\",\"state\":\"{{#if dpad_left}}pressed{{else}}released{{/if}}\"}",
+        "binary": false
+      }
+    },
+    "dpad_right": {
+      "trigger": "change",
+      "websocket": {
+        "message": "{\"type\":\"dpad\",\"direction\":\"right\",\"state\":\"{{#if dpad_right}}pressed{{else}}released{{/if}}\"}",
+        "binary": false
+      }
+    },
+    "options": {
+      "trigger": "press",
+      "websocket": {
+        "message": "{\"type\":\"system\",\"action\":\"pause\"}",
+        "binary": false
+      }
+    },
+    "touchpad": {
+      "trigger": "press",
+      "websocket": {
+        "message": "{\"type\":\"touch\",\"finger1\":{\"active\":{{touch1_active}},\"x\":{{touch1_x}},\"y\":{{touch1_y}}},\"finger2\":{\"active\":{{touch2_active}},\"x\":{{touch2_x}},\"y\":{{touch2_y}}}}",
+        "binary": false
+      }
+    }
+  },
+  "motion": {
+    "on_orientation_change": {
+      "trigger": "change",
+      "websocket": {
+        "message": "{\"type\":\"motion\",\"orientation\":{\"roll\":{{roll}},\"pitch\":{{pitch}},\"yaw\":{{yaw}}}}",
+        "binary": false
+      }
+    },
+    "orientation_rate_ms": 33
+  },
+  "led": {
+    "connected_color": { "r": 0, "g": 255, "b": 128 },
+    "error_color": { "r": 255, "g": 64, "b": 0 }
+  }
+}

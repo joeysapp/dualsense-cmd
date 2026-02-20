@@ -1,0 +1,64 @@
+[package]
+name = "dualsense-cmd"
+version = "0.1.0"
+edition = "2021"
+authors = ["dualsense-pipes contributors"]
+description = "Cross-platform CLI for DualSense controller input mapping to shell commands and WebSocket messages"
+license = "MIT"
+repository = "https://github.com/yourusername/dualsense-pipes"
+keywords = ["dualsense", "playstation", "controller", "hid", "gamepad"]
+categories = ["command-line-utilities", "hardware-support", "game-development"]
+readme = "README.md"
+
+[dependencies]
+# HID communication
+hidapi = "2.6"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# WebSocket client (using native-tls for simpler builds)
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+
+# HTTP client for curl-like functionality (using native-tls to avoid ring)
+reqwest = { version = "0.11", features = ["json", "native-tls"], default-features = false }
+
+# CLI argument parsing
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Math for quaternions and orientation
+nalgebra = "0.32"
+
+# Signal handling for graceful shutdown
+ctrlc = "3.4"
+
+# Template strings for commands
+handlebars = "5.1"
+
+# For colored terminal output
+colored = "2.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[[bin]]
+name = "dualsense-cmd"
+path = "src/main.rs"
