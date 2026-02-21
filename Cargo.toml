@@ -42,6 +42,9 @@ anyhow = "1.0"
 # Math for quaternions and orientation
 nalgebra = "0.32"
 
+# Spatial state integration (local)
+spatial-core = { path = "../spatial-core" }
+
 # Signal handling for graceful shutdown
 ctrlc = "3.4"
 

@@ -6,6 +6,7 @@
 mod config;
 mod dualsense;
 mod executor;
+mod spatial;
 mod websocket;
 
 use std::path::PathBuf;
@@ -27,6 +28,7 @@ use tracing_subscriber::EnvFilter;
 use crate::config::{Config, TemplateContext};
 use crate::dualsense::{ConnectionType, ControllerState, DualSense};
 use crate::executor::{ControllerCommand, Executor};
+use crate::spatial::{IntegrationConfig, SpatialState, VelocityCurve};
 use crate::websocket::WebSocketManager;
 
 /// DualSense controller command mapper
@@ -258,14 +260,61 @@ async fn run_mapper(config_path: PathBuf, dry_run: bool) -> Result<()> {
     // Calculate poll interval
     let poll_interval = Duration::from_micros(1_000_000 / config.poll_rate as u64);
     let mut last_state_update = Instant::now();
+    let mut last_frame_time = Instant::now();
     let state_interval = config
         .websocket
         .as_ref()
         .map(|ws| Duration::from_millis(ws.state_interval_ms))
         .unwrap_or(Duration::from_millis(0));
 
+    // Set up spatial integration if configured
+    let mut spatial_state = config.integration.as_ref().map(|int_config| {
+        let velocity_curve = match int_config.velocity_curve.to_lowercase().as_str() {
+            "quadratic" => VelocityCurve::Quadratic,
+            "cubic" => VelocityCurve::Cubic,
+            _ => VelocityCurve::Linear,
+        };
+
+        let gyro_weight = int_config
+            .orientation_filter
+            .as_ref()
+            .map(|f| f.gyro_weight)
+            .unwrap_or(0.98);
+
+        let spatial_config = IntegrationConfig {
+            velocity_curve,
+            max_linear_speed: int_config.max_linear_speed,
+            max_angular_speed: int_config.max_angular_speed,
+            linear_damping: int_config.linear_damping,
+            angular_damping: int_config.angular_damping,
+            smoothing_alpha: int_config.smoothing_alpha,
+            gyro_weight,
+            deadzone: config.deadzone,
+        };
+
+        info!(
+            "Spatial integration enabled: max_speed={} mm/s, damping={}, curve={:?}",
+            spatial_config.max_linear_speed,
+            spatial_config.linear_damping,
+            spatial_config.velocity_curve
+        );
+
+        SpatialState::new(spatial_config)
+    });
+
+    if spatial_state.is_some() {
+        println!(
+            "{} Spatial integration enabled",
+            "✓".bright_green()
+        );
+    }
+
     // Main loop
     while running.load(Ordering::SeqCst) {
+        // Calculate delta time
+        let dt = last_frame_time.elapsed().as_secs_f32();
+        last_frame_time = Instant::now();
+
         // Poll controller and extract states by cloning
         let poll_result = controller.poll(poll_interval.as_millis() as i32);
 
@@ -274,6 +323,11 @@ async fn run_mapper(config_path: PathBuf, dry_run: bool) -> Result<()> {
                 // Clone states to avoid borrow issues
                 let current_state = controller.state().clone();
                 let prev_state = controller.prev_state().clone();
+
+                // Update spatial integration if enabled
+                if let Some(ref mut spatial) = spatial_state {
+                    spatial.integrate(&current_state, dt);
+                }
 
                 // Process state changes
                 if !dry_run {
@@ -286,7 +340,10 @@ async fn run_mapper(config_path: PathBuf, dry_run: bool) -> Result<()> {
                 if state_interval.as_millis() > 0
                     && last_state_update.elapsed() >= state_interval
                 {
-                    let ctx = TemplateContext::from(&current_state);
+                    let ctx = TemplateContext::from_controller(
+                        &current_state,
+                        spatial_state.as_ref(),
+                    );
                     if let Err(e) = executor.send_state_update(&ctx).await {
                         debug!("Error sending state update: {}", e);
                     }

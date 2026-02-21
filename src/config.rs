@@ -52,6 +52,94 @@ pub struct Config {
     /// LED configuration
     #[serde(default)]
     pub led: LedConfig,
+
+    /// Spatial integration settings
+    #[serde(default)]
+    pub integration: Option<IntegrationConfig>,
+}
+
+/// Spatial integration configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrationConfig {
+    /// Velocity curve: "linear", "quadratic", "cubic"
+    #[serde(default = "default_velocity_curve")]
+    pub velocity_curve: String,
+
+    /// Maximum linear speed in mm/s
+    #[serde(default = "default_max_linear_speed")]
+    pub max_linear_speed: f32,
+
+    /// Maximum angular speed in rad/s
+    #[serde(default = "default_max_angular_speed")]
+    pub max_angular_speed: f32,
+
+    /// Linear velocity damping (0.0-1.0)
+    #[serde(default = "default_linear_damping")]
+    pub linear_damping: f32,
+
+    /// Angular velocity damping (0.0-1.0)
+    #[serde(default = "default_angular_damping")]
+    pub angular_damping: f32,
+
+    /// Low-pass filter smoothing alpha (0.0-1.0)
+    #[serde(default = "default_smoothing_alpha")]
+    pub smoothing_alpha: f32,
+
+    /// Position units (for documentation)
+    #[serde(default = "default_position_units")]
+    pub position_units: String,
+
+    /// Orientation filter settings
+    #[serde(default)]
+    pub orientation_filter: Option<OrientationFilterConfig>,
+}
+
+/// Orientation filter configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrientationFilterConfig {
+    /// Filter type: "complementary", "madgwick"
+    #[serde(default = "default_filter_type")]
+    pub r#type: String,
+
+    /// Gyro weight for complementary filter (0.0-1.0)
+    #[serde(default = "default_gyro_weight")]
+    pub gyro_weight: f32,
+}
+
+fn default_velocity_curve() -> String {
+    "linear".to_string()
+}
+
+fn default_max_linear_speed() -> f32 {
+    200.0
+}
+
+fn default_max_angular_speed() -> f32 {
+    6.0
+}
+
+fn default_linear_damping() -> f32 {
+    0.92
+}
+
+fn default_angular_damping() -> f32 {
+    0.96
+}
+
+fn default_smoothing_alpha() -> f32 {
+    0.15
+}
+
+fn default_position_units() -> String {
+    "mm".to_string()
+}
+
+fn default_filter_type() -> String {
+    "complementary".to_string()
+}
+
+fn default_gyro_weight() -> f32 {
+    0.98
 }
 
 fn default_poll_rate() -> u32 {
@@ -393,6 +481,7 @@ impl Default for Config {
             analog: AnalogMappings::default(),
             motion: MotionMappings::default(),
             led: LedConfig::default(),
+            integration: None,
         }
     }
 }
@@ -461,7 +550,7 @@ pub struct TemplateContext {
     pub l2_trigger: f32,
     pub r2_trigger: f32,
 
-    // Orientation (quaternion)
+    // Orientation (quaternion) - from spatial integration
     pub quat_w: f32,
     pub quat_x: f32,
     pub quat_y: f32,
@@ -496,17 +585,121 @@ pub struct TemplateContext {
 
     // Timestamp
     pub timestamp: u32,
+
+    // === Spatial state (integrated) ===
+
+    // Position in mm
+    pub pos_x: f32,
+    pub pos_y: f32,
+    pub pos_z: f32,
+
+    // Velocity in mm/s
+    pub vel_x: f32,
+    pub vel_y: f32,
+    pub vel_z: f32,
+
+    // Angular velocity in rad/s (from spatial state)
+    pub angvel_x: f32,
+    pub angvel_y: f32,
+    pub angvel_z: f32,
+
+    // Linear acceleration in G (from spatial state)
+    pub linacc_x: f32,
+    pub linacc_y: f32,
+    pub linacc_z: f32,
+
+    // Buttons as JSON string for WebSocket messages
+    pub buttons_json: String,
 }
 
 impl From<&crate::dualsense::ControllerState> for TemplateContext {
     fn from(state: &crate::dualsense::ControllerState) -> Self {
+        Self::from_controller(state, None)
+    }
+}
+
+impl TemplateContext {
+    /// Create a template context from controller state and optional spatial state
+    pub fn from_controller(
+        state: &crate::dualsense::ControllerState,
+        spatial: Option<&crate::spatial::SpatialState>,
+    ) -> Self {
         let (lx, ly) = state.left_stick.normalized();
         let (rx, ry) = state.right_stick.normalized();
         let (l2, r2) = state.triggers.normalized();
         let gyro = state.gyroscope.to_rad_per_sec();
         let accel = state.accelerometer.to_g();
-        let (roll, pitch, yaw) = state.euler_angles();
-        let q = state.orientation.quaternion();
+
+        // Use spatial orientation if available, otherwise fall back to controller's
+        let (quat_w, quat_x, quat_y, quat_z, roll, pitch, yaw) = if let Some(spatial) = spatial {
+            let q = spatial.orientation();
+            // Convert spatial-core quaternion to euler angles
+            // Using ZYX convention (yaw-pitch-roll)
+            let sinr_cosp = 2.0 * (q.w * q.x + q.y * q.z);
+            let cosr_cosp = 1.0 - 2.0 * (q.x * q.x + q.y * q.y);
+            let roll = sinr_cosp.atan2(cosr_cosp);
+
+            let sinp = 2.0 * (q.w * q.y - q.z * q.x);
+            let pitch = if sinp.abs() >= 1.0 {
+                std::f32::consts::FRAC_PI_2.copysign(sinp)
+            } else {
+                sinp.asin()
+            };
+
+            let siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+            let cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+            let yaw = siny_cosp.atan2(cosy_cosp);
+
+            (q.w, q.x, q.y, q.z, roll, pitch, yaw)
+        } else {
+            let (roll, pitch, yaw) = state.euler_angles();
+            let q = state.orientation.quaternion();
+            (q.w, q.i, q.j, q.k, roll, pitch, yaw)
+        };
+
+        // Spatial state values (zeros if not available)
+        let (pos_x, pos_y, pos_z) = spatial
+            .map(|s| (s.position[0], s.position[1], s.position[2]))
+            .unwrap_or((0.0, 0.0, 0.0));
+
+        let (vel_x, vel_y, vel_z) = spatial
+            .map(|s| {
+                let v = s.smoothed_velocity();
+                (v[0], v[1], v[2])
+            })
+            .unwrap_or((0.0, 0.0, 0.0));
+
+        let (angvel_x, angvel_y, angvel_z) = spatial
+            .map(|s| (s.angular_velocity[0], s.angular_velocity[1], s.angular_velocity[2]))
+            .unwrap_or((gyro.x, gyro.y, gyro.z));
+
+        let (linacc_x, linacc_y, linacc_z) = spatial
+            .map(|s| (s.linear_accel[0], s.linear_accel[1], s.linear_accel[2]))
+            .unwrap_or((accel.x, accel.y, accel.z));
+
+        // Build buttons JSON
+        let buttons_json = serde_json::json!({
+            "cross": state.buttons.cross,
+            "circle": state.buttons.circle,
+            "square": state.buttons.square,
+            "triangle": state.buttons.triangle,
+            "l1": state.buttons.l1,
+            "r1": state.buttons.r1,
+            "l2": state.buttons.l2_button,
+            "r2": state.buttons.r2_button,
+            "dpad_up": state.buttons.dpad_up,
+            "dpad_down": state.buttons.dpad_down,
+            "dpad_left": state.buttons.dpad_left,
+            "dpad_right": state.buttons.dpad_right,
+            "l3": state.buttons.l3,
+            "r3": state.buttons.r3,
+            "options": state.buttons.options,
+            "create": state.buttons.create,
+            "ps": state.buttons.ps,
+            "touchpad": state.buttons.touchpad,
+            "mute": state.buttons.mute
+        })
+        .to_string();
 
         Self {
             cross: state.buttons.cross,
@@ -529,10 +722,10 @@ impl From<&crate::dualsense::ControllerState> for TemplateContext {
             l2_trigger: l2,
             r2_trigger: r2,
 
-            quat_w: q.w,
-            quat_x: q.i,
-            quat_y: q.j,
-            quat_z: q.k,
+            quat_w,
+            quat_x,
+            quat_y,
+            quat_z,
 
             roll,
             pitch,
@@ -557,6 +750,21 @@ impl From<&crate::dualsense::ControllerState> for TemplateContext {
             touch2_y: state.touchpad.finger2.y,
 
             timestamp: state.timestamp,
+
+            // Spatial state
+            pos_x,
+            pos_y,
+            pos_z,
+            vel_x,
+            vel_y,
+            vel_z,
+            angvel_x,
+            angvel_y,
+            angvel_z,
+            linacc_x,
+            linacc_y,
+            linacc_z,
+            buttons_json,
         }
     }
 }
