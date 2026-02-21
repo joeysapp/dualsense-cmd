@@ -1,9 +1,9 @@
 {
   "name": "AxiDraw Controller",
-  "poll_rate": 60,
+  "poll_rate": 30,
   "deadzone": 0.15,
   "http": {
-    "base_url": "http://xaria.local:9700",
+    "base_url": "http://kittenblob.local:9700",
     "headers": {
       "Content-Type": "application/json"
     },
