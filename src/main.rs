@@ -3,13 +3,6 @@
 //! Cross-platform CLI for mapping DualSense controller inputs
 //! to shell commands and WebSocket messages.
 
-mod config;
-mod dualsense;
-mod executor;
-mod renderer;
-mod spatial;
-mod websocket;
-
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -26,11 +19,12 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::EnvFilter;
 
-use crate::config::{Config, TemplateContext};
-use crate::dualsense::{ConnectionType, ControllerState, DualSense};
-use crate::executor::{ControllerCommand, Executor};
-use crate::spatial::{IntegrationConfig, SpatialState, VelocityCurve};
-use crate::websocket::WebSocketManager;
+use dualsense_cmd::config::{self, Config, TemplateContext};
+use dualsense_cmd::dualsense::{self, ConnectionType, ControllerState, DualSense, DualSenseError};
+use dualsense_cmd::executor::{ControllerCommand, Executor};
+use dualsense_cmd::spatial::{IntegrationConfig, SpatialState, VelocityCurve};
+use dualsense_cmd::websocket::WebSocketManager;
+use dualsense_cmd::renderer;
 
 /// DualSense controller command mapper
 #[derive(Parser)]
@@ -356,7 +350,7 @@ async fn run_mapper(config_path: PathBuf, dry_run: bool) -> Result<()> {
                     last_state_update = Instant::now();
                 }
             }
-            Err(dualsense::DualSenseError::Timeout) => {
+            Err(DualSenseError::Timeout) => {
                 // Normal timeout, continue
             }
             Err(e) => {
@@ -486,7 +480,7 @@ async fn monitor_controller(raw: bool, json: bool) -> Result<()> {
                     print_state_pretty(state);
                 }
             }
-            Err(dualsense::DualSenseError::Timeout) => {}
+            Err(DualSenseError::Timeout) => {}
             Err(e) => {
                 error!("Controller error: {}", e);
                 break;
@@ -657,7 +651,7 @@ fn format_bar(v: f32) -> String {
 }
 
 async fn init_config(output: PathBuf, preset: &str) -> Result<()> {
-    use crate::config::*;
+    use dualsense_cmd::config::*;
 
     let config = match preset {
         "axidraw" => Config {
@@ -1036,35 +1030,6 @@ async fn test_websocket(url: &str) -> Result<()> {
     }
 }
 
-impl Default for config::ActionConfig {
-    fn default() -> Self {
-        Self {
-            trigger: "press".to_string(),
-            command: None,
-            websocket: None,
-            http: None,
-            rumble: None,
-            led: None,
-            debounce_ms: 0,
-            hold_time_ms: 0,
-        }
-    }
-}
-
-impl Default for config::StickMapping {
-    fn default() -> Self {
-        Self {
-            on_move: None,
-            on_right: None,
-            on_left: None,
-            on_up: None,
-            on_down: None,
-            threshold: 0.5,
-            rate_limit_ms: 0,
-        }
-    }
-}
-
 async fn run_3d_viewer() -> Result<()> {
     use std::sync::mpsc;
     use std::thread;
@@ -1134,7 +1099,7 @@ async fn run_3d_viewer() -> Result<()> {
                         break;
                     }
                 }
-                Err(crate::dualsense::DualSenseError::Timeout) => {
+                Err(DualSenseError::Timeout) => {
                     // Normal timeout, continue
                 }
                 Err(e) => {

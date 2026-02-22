@@ -10,6 +10,14 @@ keywords = ["dualsense", "playstation", "controller", "hid", "gamepad"]
 categories = ["command-line-utilities", "hardware-support", "game-development"]
 readme = "README.md"
 
+[lib]
+name = "dualsense_cmd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dualsense-cmd"
+path = "src/main.rs"
+
 [dependencies]
 # HID communication
 hidapi = "2.6"
@@ -60,6 +68,12 @@ winit = "0.29"
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive"] }
 
+# Tauri dependencies
+tauri = { version = "1.5", features = ["shell-open"] }
+
+[build-dependencies]
+tauri-build = "1.5"
+
 [profile.release]
 lto = true
 codegen-units = 1
@@ -67,7 +81,3 @@ strip = true
 
 [profile.dev]
 opt-level = 1
-
-[[bin]]
-name = "dualsense-cmd"
-path = "src/main.rs"

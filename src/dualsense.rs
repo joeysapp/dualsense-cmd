@@ -3,6 +3,7 @@
 //! Handles HID communication with the PlayStation DualSense controller,
 //! parsing input reports and managing controller state.
 
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,19 +14,19 @@ use thiserror::Error;
 use tracing::{debug, info, trace};
 
 /// Sony vendor ID
-const SONY_VENDOR_ID: u16 = 0x054C;
+pub const SONY_VENDOR_ID: u16 = 0x054C;
 /// DualSense product ID
-const DUALSENSE_PRODUCT_ID: u16 = 0x0CE6;
+pub const DUALSENSE_PRODUCT_ID: u16 = 0x0CE6;
 /// DualSense Edge product ID
-const DUALSENSE_EDGE_PRODUCT_ID: u16 = 0x0DF2;
+pub const DUALSENSE_EDGE_PRODUCT_ID: u16 = 0x0DF2;
 
 /// Report sizes
-const USB_REPORT_SIZE: usize = 64;
-const BT_REPORT_SIZE: usize = 78;
+pub const USB_REPORT_SIZE: usize = 64;
+pub const BT_REPORT_SIZE: usize = 78;
 
 /// Input report IDs
-const USB_INPUT_REPORT_ID: u8 = 0x01;
-const BT_INPUT_REPORT_ID: u8 = 0x31;
+pub const USB_INPUT_REPORT_ID: u8 = 0x01;
+pub const BT_INPUT_REPORT_ID: u8 = 0x31;
 
 #[derive(Error, Debug)]
 pub enum DualSenseError {
@@ -46,7 +47,7 @@ pub enum DualSenseError {
 }
 
 /// DualSense button state
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct Buttons {
     // Face buttons
     pub cross: bool,
@@ -79,7 +80,7 @@ pub struct Buttons {
 }
 
 /// Analog stick state (0-255, center at 128)
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct Stick {
     pub x: u8,
     pub y: u8,
@@ -107,7 +108,7 @@ impl Stick {
 }
 
 /// Trigger state (0-255)
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct Triggers {
     pub l2: u8,
     pub r2: u8,
@@ -121,7 +122,7 @@ impl Triggers {
 }
 
 /// Touchpad finger state
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct TouchFinger {
     pub active: bool,
     pub id: u8,
@@ -130,14 +131,14 @@ pub struct TouchFinger {
 }
 
 /// Touchpad state (supports 2 fingers)
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct Touchpad {
     pub finger1: TouchFinger,
     pub finger2: TouchFinger,
 }
 
 /// Raw gyroscope data
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct Gyroscope {
     pub x: i16,
     pub y: i16,
@@ -158,7 +159,7 @@ impl Gyroscope {
 }
 
 /// Raw accelerometer data
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct Accelerometer {
     pub x: i16,
     pub y: i16,
@@ -179,7 +180,7 @@ impl Accelerometer {
 }
 
 /// Battery status
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct Battery {
     pub level: u8,       // 0-10
     pub charging: bool,
@@ -193,7 +194,7 @@ impl Battery {
 }
 
 /// Complete controller state
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ControllerState {
     pub buttons: Buttons,
     pub left_stick: Stick,
@@ -206,6 +207,7 @@ pub struct ControllerState {
     pub timestamp: u32,
 
     // Computed orientation from sensor fusion
+    #[serde(skip)]
     pub orientation: UnitQuaternion<f32>,
 }
 
@@ -232,6 +234,9 @@ pub struct DualSense {
     orientation_filter: MadgwickFilter,
     last_update: Instant,
     running: Arc<AtomicBool>,
+    // Cached output state
+    led_state: std::sync::Mutex<(u8, u8, u8)>,
+    rumble_state: std::sync::Mutex<(u8, u8)>,
 }
 
 impl DualSense {
@@ -287,6 +292,8 @@ impl DualSense {
             orientation_filter: MadgwickFilter::new(0.1),
             last_update: Instant::now(),
             running: Arc::new(AtomicBool::new(true)),
+            led_state: std::sync::Mutex::new((255, 255, 255)), // Default white
+            rumble_state: std::sync::Mutex::new((0, 0)),
         })
     }
 
@@ -479,67 +486,62 @@ impl DualSense {
 
     /// Set controller LEDs (color)
     pub fn set_led_color(&self, r: u8, g: u8, b: u8) -> Result<(), DualSenseError> {
-        let mut report = [0u8; 48];
-
-        match self.connection_type {
-            ConnectionType::Usb => {
-                report[0] = 0x02; // Output report ID for USB
-                report[1] = 0x03; // Feature flags
-                report[2] = 0x14; // More flags
-
-                // LED color
-                report[44] = r;
-                report[45] = g;
-                report[46] = b;
-
-                self.device.write(&report)?;
-            }
-            ConnectionType::Bluetooth => {
-                let mut bt_report = [0u8; 78];
-                bt_report[0] = 0x31; // BT output report ID
-                bt_report[1] = 0x02; // Flags
-                bt_report[2] = 0x03;
-                bt_report[3] = 0x14;
-
-                bt_report[45] = r;
-                bt_report[46] = g;
-                bt_report[47] = b;
-
-                self.device.write(&bt_report)?;
-            }
+        {
+            let mut led = self.led_state.lock().unwrap();
+            *led = (r, g, b);
         }
-
-        debug!("Set LED color: ({}, {}, {})", r, g, b);
-        Ok(())
+        self.send_output_report()
     }
 
     /// Set controller rumble
     pub fn set_rumble(&self, left: u8, right: u8) -> Result<(), DualSenseError> {
-        let mut report = [0u8; 48];
+        {
+            let mut rumble = self.rumble_state.lock().unwrap();
+            *rumble = (left, right);
+        }
+        self.send_output_report()
+    }
 
+    /// Internal helper to send output reports
+    fn send_output_report(&self) -> Result<(), DualSenseError> {
+        let (r, g, b) = *self.led_state.lock().unwrap();
+        let (left, right) = *self.rumble_state.lock().unwrap();
+        
         match self.connection_type {
             ConnectionType::Usb => {
-                report[0] = 0x02;
-                report[1] = 0x01; // Enable rumble
-                report[2] = 0x00;
+                let mut report = [0u8; 48];
+                report[0] = 0x02; // Output report ID
+                
+                // Flags: 0x01 (Rumble) | 0x02 (Haptics) | 0x04 (Lightbar)
+                report[1] = 0x01 | 0x02 | 0x04 | 0x10 | 0x40;
+                
                 report[3] = left;
                 report[4] = right;
-
+                
+                report[45] = r;
+                report[46] = g;
+                report[47] = b;
+                
                 self.device.write(&report)?;
             }
             ConnectionType::Bluetooth => {
-                let mut bt_report = [0u8; 78];
-                bt_report[0] = 0x31;
-                bt_report[1] = 0x02;
-                bt_report[2] = 0x01;
-                bt_report[4] = left;
-                bt_report[5] = right;
-
-                self.device.write(&bt_report)?;
+                let mut report = [0u8; 78];
+                report[0] = 0x31; // BT output report ID
+                report[1] = 0x02; // Seq/Tag
+                
+                // Flags: 0x01 (Rumble) | 0x02 (Haptics) | 0x04 (Lightbar)
+                report[2] = 0x01 | 0x02 | 0x04 | 0x10 | 0x40;
+                
+                report[4] = left;
+                report[5] = right;
+                
+                report[46] = r;
+                report[47] = g;
+                report[48] = b;
+                
+                self.device.write(&report)?;
             }
         }
-
-        debug!("Set rumble: left={}, right={}", left, right);
         Ok(())
     }
 

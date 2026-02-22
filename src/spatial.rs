@@ -130,6 +130,16 @@ impl SpatialState {
         snapshot
     }
 
+    /// Reset all spatial state to initial values
+    pub fn reset(&mut self) {
+        self.position = [0.0; 3];
+        self.velocity = [0.0; 3];
+        self.linear_accel = [0.0; 3];
+        self.angular_velocity = [0.0; 3];
+        self.smoothed_velocity = [0.0; 3];
+        self.orientation_filter.orientation = spatial_core::Quaternion::IDENTITY;
+    }
+
     /// Reset position to origin (keeps orientation)
     pub fn reset_position(&mut self) {
         self.position = [0.0; 3];

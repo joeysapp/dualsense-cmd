@@ -1,35 +1,6 @@
 # dualsense-cmd
 A fast, cross-platform CLI for mapping PlayStation DualSense controller inputs to shell commands, HTTP requests, and WebSocket messages.
 
-# Immediate Todos
-## Use spatial-core for:
- - Positioning using accelerometer and possible bluetooth latencies
- - Adaptive Triggers: Stiffen the triggers based on "tension" or "wind resistance".
- - `Quaternion` structs with fundamental and necessary operations for 3D rotations and controls using the 
- - `Projections` of 3D objects onto 2D planes for rendering
-	- Website canvases, SVGs, AxiDraw plotting
-	- Calculating how 'far away' objects being projected should be to simulate 3D motion on 2D surface
-   - e.g. using the dot product of face normals to determine visibility of a surface in rendering	
- - Tilt-to-Wind: Map Controller Roll/Pitch -> Wind Vector.
- - Force Feedback: Rumble based on particle speed or collision.
-## Use spatial-core to handle our spatial state for external commands. Calculations using gyro/accel:
-* Gyroscope (angular velocity)
-* Accelerometer (linear acceleration)
-* Possibly firmware-provided orientation
-The right way to handle this is:
-- gyro integration gives us orientation prediction
-- accelerometer gives us gravity correction
-- and we blend via complementary filter. minimal looks like:
-```
-alpha ~= 0.98 for very smooth (lower alpha for more drift correction - no wobble)
-q_predicted = q * delta_q_from_gyro
-q_accel = orientation_from_gravity(accel)
-q_new = normalize(slerp(q_predicted, q_accel, alpha))
-```  
-## For now, consider the rigid dx/dy left_stick_x etc. controls as backburner material. dualsense-cmd needs its own state.
-
----
-
 ## Features
 
 - **Cross-platform**: Works on macOS (Intel & Apple Silicon) and Linux
@@ -57,7 +28,7 @@ q_new = normalize(slerp(q_predicted, q_accel, alpha))
 git clone https://github.com/yourusername/dualsense-pipes.git
 cd dualsense-pipes
 
-# Build release binary
+# Build release binary (todo: have this provided by github release.)
 cargo build --release
 
 # Install to ~/.cargo/bin
@@ -66,7 +37,7 @@ cargo install --path .
 
 ### Pre-built binaries
 
-Download from the [Releases](https://github.com/yourusername/dualsense-pipes/releases) page.
+(TODO) Download from the [Releases](https://github.com/yourusername/dualsense-pipes/releases) page.
 
 ### Platform-specific setup
 
@@ -311,6 +282,13 @@ cargo build --release --target aarch64-apple-darwin
 ```
 
 ## Troubleshooting
+
+### Controller connected but can't hear anything from it (macOS)
+
+1. In System Settings, go to Bluetooth and click the grey `i` on the DS
+2. Click Game Controller Settings
+3. Click the blue text 'Identify'
+4. Rerun the monitor and you should see your input now
 
 ### Controller not found
 

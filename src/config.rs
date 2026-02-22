@@ -315,6 +315,20 @@ pub struct StickMapping {
     pub rate_limit_ms: u64,
 }
 
+impl Default for StickMapping {
+    fn default() -> Self {
+        Self {
+            on_move: None,
+            on_right: None,
+            on_left: None,
+            on_up: None,
+            on_down: None,
+            threshold: default_threshold(),
+            rate_limit_ms: 0,
+        }
+    }
+}
+
 fn default_threshold() -> f32 {
     0.5
 }
@@ -333,6 +347,16 @@ pub struct TriggerMapping {
     /// Threshold for press detection (0.0 - 1.0)
     #[serde(default = "default_threshold")]
     pub threshold: f32,
+}
+
+impl Default for TriggerMapping {
+    fn default() -> Self {
+        Self {
+            on_change: None,
+            on_press: None,
+            threshold: default_threshold(),
+        }
+    }
 }
 
 /// Motion/IMU mappings
@@ -393,6 +417,21 @@ pub struct ActionConfig {
     /// Only trigger if button held for this duration (ms)
     #[serde(default)]
     pub hold_time_ms: u64,
+}
+
+impl Default for ActionConfig {
+    fn default() -> Self {
+        Self {
+            trigger: default_trigger(),
+            command: None,
+            websocket: None,
+            http: None,
+            rumble: None,
+            led: None,
+            debounce_ms: 0,
+            hold_time_ms: 0,
+        }
+    }
 }
 
 fn default_trigger() -> String {
