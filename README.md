@@ -1,6 +1,34 @@
 # dualsense-cmd
-
 A fast, cross-platform CLI for mapping PlayStation DualSense controller inputs to shell commands, HTTP requests, and WebSocket messages.
+
+# Immediate Todos
+## Use spatial-core for:
+ - Positioning using accelerometer and possible bluetooth latencies
+ - Adaptive Triggers: Stiffen the triggers based on "tension" or "wind resistance".
+ - `Quaternion` structs with fundamental and necessary operations for 3D rotations and controls using the 
+ - `Projections` of 3D objects onto 2D planes for rendering
+	- Website canvases, SVGs, AxiDraw plotting
+	- Calculating how 'far away' objects being projected should be to simulate 3D motion on 2D surface
+   - e.g. using the dot product of face normals to determine visibility of a surface in rendering	
+ - Tilt-to-Wind: Map Controller Roll/Pitch -> Wind Vector.
+ - Force Feedback: Rumble based on particle speed or collision.
+## Use spatial-core to handle our spatial state for external commands. Calculations using gyro/accel:
+* Gyroscope (angular velocity)
+* Accelerometer (linear acceleration)
+* Possibly firmware-provided orientation
+The right way to handle this is:
+- gyro integration gives us orientation prediction
+- accelerometer gives us gravity correction
+- and we blend via complementary filter. minimal looks like:
+```
+alpha ~= 0.98 for very smooth (lower alpha for more drift correction - no wobble)
+q_predicted = q * delta_q_from_gyro
+q_accel = orientation_from_gravity(accel)
+q_new = normalize(slerp(q_predicted, q_accel, alpha))
+```  
+## For now, consider the rigid dx/dy left_stick_x etc. controls as backburner material. dualsense-cmd needs its own state.
+
+---
 
 ## Features
 
@@ -185,6 +213,7 @@ Configurations are JSON files that define how controller inputs map to actions.
 ### Template Variables
 
 All actions support Handlebars templates with these variables:
+**TODO** Legacy implementation, needs to provide spatial state too
 
 | Variable | Type | Description |
 |----------|------|-------------|
@@ -203,6 +232,7 @@ All actions support Handlebars templates with these variables:
 ### Feedback
 
 #### Rumble
+**TODO** Does not work
 ```json
 {
   "rumble": {
@@ -223,27 +253,12 @@ All actions support Handlebars templates with these variables:
 ### Example Configurations
 
 See the `config/` directory for complete examples:
-
-- `config.json` - Basic shell commands
-- `axidraw.json` - AxiDraw plotter control via HTTP
-- `websocket-streaming.json` - High-performance WebSocket streaming
+- `example.json` - Basic shell commands
 - `curl-commands.json` - REST API via curl commands
 
 ## WebSocket Streaming
 
-For real-time applications, use WebSocket streaming:
-
-```json
-{
-  "websocket": {
-    "url": "ws://localhost:8080/controller",
-    "state_format": "{\"x\":{{left_stick_x}},\"y\":{{left_stick_y}}}",
-    "state_interval_ms": 16
-  }
-}
-```
-
-This sends controller state at ~60fps, ideal for:
+For real-time applications, use WebSocket streaming at >16ms or less. This sends controller state at ~60fps, ideal for:
 - Game input
 - Real-time visualization
 - Motion tracking

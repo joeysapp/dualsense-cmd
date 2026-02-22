@@ -6,6 +6,7 @@
 mod config;
 mod dualsense;
 mod executor;
+mod renderer;
 mod spatial;
 mod websocket;
 
@@ -97,6 +98,10 @@ enum Commands {
         /// WebSocket URL to test
         url: String,
     },
+
+    /// Open 3D visualization of controller orientation and motion
+    #[command(name = "3d")]
+    ThreeD,
 }
 
 #[tokio::main]
@@ -128,6 +133,7 @@ async fn main() -> Result<()> {
         Commands::Init { output, preset } => init_config(output, &preset).await,
         Commands::Validate { file } => validate_config(file).await,
         Commands::TestWs { url } => test_websocket(&url).await,
+        Commands::ThreeD => run_3d_viewer().await,
     }
 }
 
@@ -1058,3 +1064,106 @@ impl Default for config::StickMapping {
         }
     }
 }
+
+async fn run_3d_viewer() -> Result<()> {
+    use std::sync::mpsc;
+    use std::thread;
+
+    println!(
+        "{} Starting 3D visualization...",
+        "→".bright_blue()
+    );
+
+    // Set up shutdown signal
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    // Connect to controller
+    println!(
+        "{} Searching for DualSense controller...",
+        "→".bright_blue()
+    );
+
+    let mut controller = DualSense::find_and_connect()
+        .context("Failed to connect to DualSense controller")?;
+
+    let connection_type = controller.connection_type();
+    println!(
+        "{} Connected via {}",
+        "✓".bright_green(),
+        match connection_type {
+            ConnectionType::Usb => "USB".bright_cyan(),
+            ConnectionType::Bluetooth => "Bluetooth".bright_magenta(),
+        }
+    );
+
+    // Set LED to indicate 3D mode (purple)
+    controller.set_led_color(128, 0, 255).ok();
+
+    // Create channel for sending spatial state to renderer
+    let (tx, rx) = mpsc::channel::<SpatialState>();
+
+    println!("{} Opening 3D window...", "→".bright_blue());
+    println!("{}", "Close the window or press Ctrl+C to stop".dimmed());
+
+    // On macOS, winit requires the event loop to run on the main thread.
+    // So we spawn the controller polling in a background thread instead.
+    let controller_running = running.clone();
+    let controller_handle = thread::spawn(move || {
+        let spatial_config = IntegrationConfig::default();
+        let mut spatial_state = SpatialState::new(spatial_config);
+        let mut last_frame = std::time::Instant::now();
+
+        while controller_running.load(Ordering::SeqCst) {
+            let dt = last_frame.elapsed().as_secs_f32();
+            last_frame = std::time::Instant::now();
+
+            match controller.poll(8) {
+                Ok(state) => {
+                    // Update spatial state with controller data
+                    spatial_state.integrate(state, dt);
+
+                    // Send snapshot of spatial state to renderer
+                    if tx.send(spatial_state.snapshot()).is_err() {
+                        // Receiver dropped, exit
+                        break;
+                    }
+                }
+                Err(crate::dualsense::DualSenseError::Timeout) => {
+                    // Normal timeout, continue
+                }
+                Err(e) => {
+                    eprintln!("Controller error: {}", e);
+                    break;
+                }
+            }
+
+            // Small sleep to avoid busy-waiting
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        // Clean up
+        controller.close();
+    });
+
+    // Run renderer on main thread (required by macOS)
+    if let Err(e) = renderer::run_3d_visualization(rx) {
+        eprintln!("Renderer error: {}", e);
+    }
+
+    // Signal controller thread to stop
+    running.store(false, Ordering::SeqCst);
+
+    // Wait for controller thread
+    let _ = controller_handle.join();
+
+    println!("\n{} 3D visualization stopped", "✓".bright_green());
+
+    Ok(())
+}
+

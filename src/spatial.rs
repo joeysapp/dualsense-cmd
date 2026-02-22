@@ -112,6 +112,24 @@ impl SpatialState {
         &self.orientation_filter.orientation
     }
 
+    /// Set the orientation directly (for snapshotting)
+    pub fn set_orientation(&mut self, quat: Quaternion) {
+        self.orientation_filter.orientation = quat;
+    }
+
+    /// Create a snapshot copy of the spatial state (for sending to renderer)
+    pub fn snapshot(&self) -> SpatialState {
+        let config = self.config.clone();
+        let mut snapshot = SpatialState::new(config);
+        snapshot.position = self.position;
+        snapshot.velocity = self.velocity;
+        snapshot.linear_accel = self.linear_accel;
+        snapshot.angular_velocity = self.angular_velocity;
+        snapshot.smoothed_velocity = self.smoothed_velocity;
+        snapshot.orientation_filter.orientation = self.orientation_filter.orientation;
+        snapshot
+    }
+
     /// Reset position to origin (keeps orientation)
     pub fn reset_position(&mut self) {
         self.position = [0.0; 3];

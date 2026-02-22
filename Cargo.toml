@@ -54,6 +54,12 @@ handlebars = "5.1"
 # For colored terminal output
 colored = "2.1"
 
+# 3D rendering
+wgpu = "0.19"
+winit = "0.29"
+pollster = "0.3"
+bytemuck = { version = "1.14", features = ["derive"] }
+
 [profile.release]
 lto = true
 codegen-units = 1
