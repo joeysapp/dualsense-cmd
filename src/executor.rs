@@ -426,12 +426,12 @@ impl Executor {
         if let Some(http_req) = &action.http {
             self.execute_http_request(http_req, ctx).await?;
         }
-
+        // [TODO] Doesn't seem to work on macOS
         // Rumble feedback
         if let Some(rumble) = &action.rumble {
             self.trigger_rumble(rumble).await?;
         }
-
+        // [TODO] Doesn't seem to work on macOS
         // LED feedback
         if let Some(led) = &action.led {
             self.controller_cmd_tx
@@ -600,7 +600,7 @@ impl Executor {
 
         Ok(())
     }
-
+    /// [TODO] Doesn't seem to work on macOS
     async fn trigger_rumble(&self, rumble: &RumbleConfig) -> Result<()> {
         self.controller_cmd_tx
             .send(ControllerCommand::SetRumble(

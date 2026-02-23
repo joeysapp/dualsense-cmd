@@ -20,8 +20,9 @@ use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::EnvFilter;
 
 use dualsense_cmd::config::{self, Config, TemplateContext};
-use dualsense_cmd::dualsense::{self, ConnectionType, ControllerState, DualSense, DualSenseError};
+use dualsense_cmd::dualsense::{ConnectionType, ControllerState, DualSense, DualSenseError};
 use dualsense_cmd::executor::{ControllerCommand, Executor};
+use dualsense_cmd::profile::{Profile, ProfileManager};
 use dualsense_cmd::spatial::{IntegrationConfig, SpatialState, VelocityCurve};
 use dualsense_cmd::websocket::WebSocketManager;
 use dualsense_cmd::renderer;
@@ -96,6 +97,87 @@ enum Commands {
     /// Open 3D visualization of controller orientation and motion
     #[command(name = "3d")]
     ThreeD,
+
+    /// Manage controller profiles (LED, triggers, player LEDs)
+    Profile {
+        #[command(subcommand)]
+        action: ProfileCommands,
+    },
+
+    /// Show supported protocol features and their status
+    Features,
+}
+
+#[derive(Subcommand)]
+enum ProfileCommands {
+    /// List available profiles
+    List,
+
+    /// Show profile details
+    Show {
+        /// Profile name
+        name: String,
+    },
+
+    /// Apply a profile to the connected controller
+    Apply {
+        /// Profile name
+        name: String,
+    },
+
+    /// Create a new profile
+    Create {
+        /// Profile name
+        name: String,
+
+        /// Profile description
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// LED color (hex format: #RRGGBB or RRGGBB)
+        #[arg(long)]
+        led: Option<String>,
+
+        /// L2 trigger effect preset: off, continuous, weapon, bow, vibration
+        #[arg(long)]
+        l2: Option<String>,
+
+        /// L2 trigger force (0-255)
+        #[arg(long)]
+        l2_force: Option<u8>,
+
+        /// R2 trigger effect preset: off, continuous, weapon, bow, vibration
+        #[arg(long)]
+        r2: Option<String>,
+
+        /// R2 trigger force (0-255)
+        #[arg(long)]
+        r2_force: Option<u8>,
+
+        /// Player number for LEDs (1-5)
+        #[arg(long)]
+        player: Option<u8>,
+
+        /// Initialize from a preset: default, gaming, racing, accessibility
+        #[arg(long)]
+        preset: Option<String>,
+    },
+
+    /// Delete a profile
+    Delete {
+        /// Profile name
+        name: String,
+
+        /// Skip confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Initialize default profiles
+    InitDefaults,
+
+    /// Show profiles directory
+    Dir,
 }
 
 #[tokio::main]
@@ -128,6 +210,8 @@ async fn main() -> Result<()> {
         Commands::Validate { file } => validate_config(file).await,
         Commands::TestWs { url } => test_websocket(&url).await,
         Commands::ThreeD => run_3d_viewer().await,
+        Commands::Profile { action } => handle_profile_command(action).await,
+        Commands::Features => show_features().await,
     }
 }
 
@@ -1128,6 +1212,293 @@ async fn run_3d_viewer() -> Result<()> {
     let _ = controller_handle.join();
 
     println!("\n{} 3D visualization stopped", "✓".bright_green());
+
+    Ok(())
+}
+
+async fn handle_profile_command(action: ProfileCommands) -> Result<()> {
+    use dualsense_cmd::profile::{ProfileLedColor, ProfileTriggerEffect, ProfilePlayerLeds};
+
+    let manager = ProfileManager::new()?;
+
+    match action {
+        ProfileCommands::List => {
+            let profiles = manager.list()?;
+
+            if profiles.is_empty() {
+                println!("{} No profiles found", "!".bright_yellow());
+                println!("\nCreate default profiles with: {} profile init-defaults", "dualsense-cmd".bright_cyan());
+                println!("Or create a new profile with: {} profile create <name>", "dualsense-cmd".bright_cyan());
+            } else {
+                println!("{}", "Available Profiles".bright_white().bold());
+                println!("{}", "══════════════════════════════════════".dimmed());
+                for profile in profiles {
+                    println!(
+                        "  {} - {}",
+                        profile.name.bright_cyan(),
+                        profile.description.dimmed()
+                    );
+                }
+            }
+        }
+
+        ProfileCommands::Show { name } => {
+            let profile = manager.get(&name)?;
+
+            println!("{}", "Profile Details".bright_white().bold());
+            println!("{}", "══════════════════════════════════════".dimmed());
+            println!("  Name:        {}", profile.name.bright_cyan());
+            println!("  Description: {}", profile.description);
+            println!(
+                "  LED Color:   #{:02X}{:02X}{:02X}",
+                profile.led_color.r, profile.led_color.g, profile.led_color.b
+            );
+            println!("  L2 Trigger:  {} (force: {})",
+                profile.l2_trigger.effect_type.bright_yellow(),
+                profile.l2_trigger.force
+            );
+            println!("  R2 Trigger:  {} (force: {})",
+                profile.r2_trigger.effect_type.bright_yellow(),
+                profile.r2_trigger.force
+            );
+            if let Some(ref leds) = profile.player_leds {
+                match leds {
+                    ProfilePlayerLeds::Number(n) => println!("  Player LEDs: Player {}", n),
+                    ProfilePlayerLeds::Custom { led1, led2, led3, led4, led5 } => {
+                        let pattern: String = [led1, led2, led3, led4, led5]
+                            .iter()
+                            .map(|&b| if *b { "●" } else { "○" })
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        println!("  Player LEDs: {}", pattern);
+                    }
+                }
+            }
+        }
+
+        ProfileCommands::Apply { name } => {
+            let profile = manager.get(&name)?;
+
+            println!(
+                "{} Applying profile: {}",
+                "→".bright_blue(),
+                profile.name.bright_cyan()
+            );
+
+            let controller = DualSense::find_and_connect()
+                .context("Failed to connect to DualSense controller")?;
+
+            // Apply the output state from profile
+            let output_state = profile.to_output_state();
+            controller.apply_output_state(output_state)?;
+
+            println!("{} Profile applied successfully", "✓".bright_green());
+            println!(
+                "  LED: #{:02X}{:02X}{:02X}",
+                profile.led_color.r, profile.led_color.g, profile.led_color.b
+            );
+            println!("  L2:  {}", profile.l2_trigger.effect_type);
+            println!("  R2:  {}", profile.r2_trigger.effect_type);
+
+            // Keep controller alive briefly to let effects take
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        ProfileCommands::Create {
+            name,
+            description,
+            led,
+            l2,
+            l2_force,
+            r2,
+            r2_force,
+            player,
+            preset,
+        } => {
+            // Start from preset or default
+            let mut profile = match preset.as_deref() {
+                Some("gaming") => Profile::preset_gaming(),
+                Some("racing") => Profile::preset_racing(),
+                Some("accessibility") => Profile::preset_accessibility(),
+                _ => Profile::preset_default(),
+            };
+
+            // Override with provided values
+            profile.name = name.clone();
+            if let Some(desc) = description {
+                profile.description = desc;
+            }
+
+            if let Some(led_hex) = led {
+                let hex = led_hex.trim_start_matches('#');
+                if hex.len() == 6 {
+                    if let (Ok(r), Ok(g), Ok(b)) = (
+                        u8::from_str_radix(&hex[0..2], 16),
+                        u8::from_str_radix(&hex[2..4], 16),
+                        u8::from_str_radix(&hex[4..6], 16),
+                    ) {
+                        profile.led_color = ProfileLedColor { r, g, b };
+                    }
+                }
+            }
+
+            if let Some(l2_type) = l2 {
+                profile.l2_trigger = ProfileTriggerEffect {
+                    effect_type: l2_type,
+                    force: l2_force.unwrap_or(200),
+                    start: 70,
+                    end: 160,
+                    frequency: 10,
+                };
+            } else if let Some(force) = l2_force {
+                profile.l2_trigger.force = force;
+            }
+
+            if let Some(r2_type) = r2 {
+                profile.r2_trigger = ProfileTriggerEffect {
+                    effect_type: r2_type,
+                    force: r2_force.unwrap_or(200),
+                    start: 70,
+                    end: 160,
+                    frequency: 10,
+                };
+            } else if let Some(force) = r2_force {
+                profile.r2_trigger.force = force;
+            }
+
+            if let Some(p) = player {
+                profile.player_leds = Some(ProfilePlayerLeds::Number(p.clamp(1, 5)));
+            }
+
+            let path = manager.save(&profile)?;
+            println!("{} Created profile: {}", "✓".bright_green(), profile.name.bright_cyan());
+            println!("  Saved to: {}", path.display().to_string().dimmed());
+        }
+
+        ProfileCommands::Delete { name, force } => {
+            if !manager.exists(&name) {
+                println!("{} Profile not found: {}", "✗".bright_red(), name);
+                return Ok(());
+            }
+
+            if !force {
+                println!("Delete profile '{}'? [y/N] ", name.bright_yellow());
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                if !input.trim().eq_ignore_ascii_case("y") {
+                    println!("Cancelled");
+                    return Ok(());
+                }
+            }
+
+            manager.delete(&name)?;
+            println!("{} Deleted profile: {}", "✓".bright_green(), name);
+        }
+
+        ProfileCommands::InitDefaults => {
+            manager.init_defaults()?;
+            println!("{} Created default profiles", "✓".bright_green());
+            for profile in manager.list()? {
+                println!("  • {}", profile.name.bright_cyan());
+            }
+        }
+
+        ProfileCommands::Dir => {
+            let dir = ProfileManager::get_profiles_dir()?;
+            println!("Profiles directory: {}", dir.display().to_string().bright_cyan());
+            println!("\nSet {} environment variable to change location", "DUALSENSE_HOME".bright_yellow());
+        }
+    }
+
+    Ok(())
+}
+
+async fn show_features() -> Result<()> {
+    println!("{}", "DualSense Protocol Features".bright_white().bold());
+    println!("{}", "═══════════════════════════════════════════════════════════════════".dimmed());
+    println!();
+
+    // Input features
+    println!("{}", "INPUT (Receiving from Controller)".bright_cyan().bold());
+    println!("{}", "─────────────────────────────────────────────────────────────────".dimmed());
+
+    let input_features = [
+        ("✓", "Thumbsticks (analog)", "Left stick, Right stick - X/Y axes with deadzone support"),
+        ("✓", "Action buttons", "Cross, Circle, Square, Triangle - digital press/release"),
+        ("✓", "Directional buttons", "D-pad Up, Down, Left, Right - 8-way hat switch"),
+        ("✓", "Bumpers", "L1, R1 - digital shoulder buttons"),
+        ("✓", "Triggers (pressure-sensitive)", "L2, R2 - 8-bit analog (0-255)"),
+        ("✓", "Thumbstick buttons", "L3, R3 - click detection"),
+        ("✓", "Create button", "Front-left system button"),
+        ("✓", "Options button", "Front-right menu button"),
+        ("✓", "PS button", "Central PlayStation button"),
+        ("✓", "Mute button", "Microphone mute toggle with LED"),
+        ("✓", "Touch pad button", "Clickable touchpad surface"),
+        ("✓", "Touch pad multitouch", "2-finger tracking with X/Y coordinates"),
+        ("✓", "Accelerometer", "3-axis acceleration (X, Y, Z) in G"),
+        ("✓", "Gyroscope", "3-axis rotation (X, Y, Z) in rad/s"),
+        ("✓", "Battery status", "Level (0-100%), charging state"),
+        ("◐", "Microphone", "Audio input - requires OS-level access"),
+        ("◐", "Headset jack input", "Audio input - requires OS-level access"),
+    ];
+
+    for (status, name, desc) in input_features {
+        let status_colored = match status {
+            "✓" => status.bright_green(),
+            "◐" => status.bright_yellow(),
+            _ => status.dimmed(),
+        };
+        println!("  {} {} - {}", status_colored, name.bright_white(), desc.dimmed());
+    }
+
+    println!();
+    println!("{}", "OUTPUT (Sending to Controller)".bright_magenta().bold());
+    println!("{}", "─────────────────────────────────────────────────────────────────".dimmed());
+
+    let output_features = [
+        ("✓", "Haptic feedback", "Dual rumble motors (left: low-freq, right: high-freq)"),
+        ("✓", "Adaptive triggers", "Programmable L2/R2 resistance and vibration effects"),
+        ("✓", "Light bar (RGB LED)", "Full color control with brightness"),
+        ("✓", "Player LEDs", "5 indicator LEDs below touchpad"),
+        ("✓", "Mute LED", "Mic mute indicator control (on/off/breathing)"),
+        ("◐", "Speaker", "Audio output - requires OS-level access"),
+        ("◐", "Headset jack output", "Audio output - requires OS-level access"),
+    ];
+
+    for (status, name, desc) in output_features {
+        let status_colored = match status {
+            "✓" => status.bright_green(),
+            "◐" => status.bright_yellow(),
+            _ => status.dimmed(),
+        };
+        println!("  {} {} - {}", status_colored, name.bright_white(), desc.dimmed());
+    }
+
+    println!();
+    println!("{}", "CONNECTION".bright_blue().bold());
+    println!("{}", "─────────────────────────────────────────────────────────────────".dimmed());
+
+    let connection_features = [
+        ("✓", "USB", "Direct HID connection, no authentication required"),
+        ("✓", "Bluetooth", "Wireless with CRC32 checksum validation"),
+    ];
+
+    for (status, name, desc) in connection_features {
+        let status_colored = match status {
+            "✓" => status.bright_green(),
+            "◐" => status.bright_yellow(),
+            _ => status.dimmed(),
+        };
+        println!("  {} {} - {}", status_colored, name.bright_white(), desc.dimmed());
+    }
+
+    println!();
+    println!("{}", "Legend:".dimmed());
+    println!("  {} Implemented     {} OS/Future", "✓".bright_green(), "◐".bright_yellow());
+
+    println!();
+    println!("{}", "Note: Bluetooth output features may require 'identifying' the controller".dimmed());
+    println!("{}", "      through System Settings on macOS before they work properly.".dimmed());
 
     Ok(())
 }

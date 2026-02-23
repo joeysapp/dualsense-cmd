@@ -1,7 +1,7 @@
 [package]
 name = "dualsense-cmd-gui"
 version = "0.1.0"
-description = "DualSense CMD GUI"
+description = "DualSense Command GUI"
 authors = ["dualsense-pipes contributors"]
 edition = "2021"
 

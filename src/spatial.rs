@@ -3,27 +3,56 @@
 //! Integrates controller inputs (sticks, triggers, IMU) into spatial state
 //! (position, velocity, orientation) using configurable physics parameters.
 
+use serde::{Deserialize, Serialize};
 use spatial_core::{ComplementaryFilter, Quaternion};
 
 use crate::dualsense::ControllerState;
+
+/// Integration modes for the controller
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum SpatialMode {
+    /// Standard integration: Left stick X/Y planar, Triggers for Z
+    Standard,
+    /// Heading-based movement: Rotation by gyro, Triggers for forward/back
+    Heading,
+    /// Accelerometer-based movement: Position changes based on acceleration
+    Accelerometer,
+    /// AxiDraw 2D Plotter: Right stick X/Y, Triggers for Pen Z
+    AxiDraw,
+    /// 3D Tool: Standard 3D navigation (Triggers and Sticks)
+    ThreeD,
+}
+
+impl Default for SpatialMode {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
 
 /// Configuration for spatial integration, parsed from JSON config
 #[derive(Debug, Clone)]
 pub struct IntegrationConfig {
     /// Velocity curve: "linear", "quadratic", "cubic"
     pub velocity_curve: VelocityCurve,
+
     /// Maximum linear speed in mm/s
     pub max_linear_speed: f32,
+
     /// Maximum angular speed in rad/s
     pub max_angular_speed: f32,
+
     /// Linear velocity damping factor (0.0-1.0), applied per frame
     pub linear_damping: f32,
+
     /// Angular velocity damping factor (0.0-1.0), applied per frame
     pub angular_damping: f32,
+
     /// Smoothing alpha for low-pass filter (0.0-1.0)
     pub smoothing_alpha: f32,
+
     /// Gyro weight for complementary filter (0.0-1.0)
     pub gyro_weight: f32,
+
     /// Deadzone for stick inputs
     pub deadzone: f32,
 }
@@ -37,13 +66,13 @@ impl Default for IntegrationConfig {
             linear_damping: 0.92,
             angular_damping: 0.96,
             smoothing_alpha: 0.15,
-            gyro_weight: 0.98,
-            deadzone: 0.08,
+            gyro_weight: 0.92,
+            deadzone: 0.12,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum VelocityCurve {
     Linear,
     Quadratic,
@@ -66,25 +95,38 @@ impl VelocityCurve {
 
 /// Spatial state tracking position, velocity, and orientation
 pub struct SpatialState {
+    /// Current integration mode
+    pub mode: SpatialMode,
+
     /// Position in mm (X, Y, Z)
     pub position: [f32; 3],
+
     /// Velocity in mm/s (X, Y, Z)
     pub velocity: [f32; 3],
+
     /// Linear acceleration from accelerometer in G (X, Y, Z)
     pub linear_accel: [f32; 3],
+
     /// Angular velocity from gyroscope in rad/s (X, Y, Z)
     pub angular_velocity: [f32; 3],
+
     /// Smoothed velocity for output
     smoothed_velocity: [f32; 3],
+
     /// Orientation filter (complementary filter for gyro+accel fusion)
     orientation_filter: ComplementaryFilter,
+
     /// Integration config
     config: IntegrationConfig,
+
+    /// Current "force" vector for AxiDraw mode (from D-pad)
+    axidraw_force_type: u8,
 }
 
 impl std::fmt::Debug for SpatialState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpatialState")
+            .field("mode", &self.mode)
             .field("position", &self.position)
             .field("velocity", &self.velocity)
             .field("linear_accel", &self.linear_accel)
@@ -97,6 +139,7 @@ impl std::fmt::Debug for SpatialState {
 impl SpatialState {
     pub fn new(config: IntegrationConfig) -> Self {
         Self {
+            mode: SpatialMode::Standard,
             position: [0.0; 3],
             velocity: [0.0; 3],
             linear_accel: [0.0; 3],
@@ -104,6 +147,7 @@ impl SpatialState {
             smoothed_velocity: [0.0; 3],
             orientation_filter: ComplementaryFilter::new(config.gyro_weight),
             config,
+            axidraw_force_type: 0,
         }
     }
 
@@ -121,12 +165,14 @@ impl SpatialState {
     pub fn snapshot(&self) -> SpatialState {
         let config = self.config.clone();
         let mut snapshot = SpatialState::new(config);
+        snapshot.mode = self.mode;
         snapshot.position = self.position;
         snapshot.velocity = self.velocity;
         snapshot.linear_accel = self.linear_accel;
         snapshot.angular_velocity = self.angular_velocity;
         snapshot.smoothed_velocity = self.smoothed_velocity;
         snapshot.orientation_filter.orientation = self.orientation_filter.orientation;
+        snapshot.axidraw_force_type = self.axidraw_force_type;
         snapshot
     }
 
@@ -152,44 +198,185 @@ impl SpatialState {
         self.orientation_filter.orientation = Quaternion::IDENTITY;
     }
 
+    /// Set the spatial mode
+    pub fn set_mode(&mut self, mode: SpatialMode) {
+        self.mode = mode;
+        // Reset some state when switching modes if necessary
+        self.velocity = [0.0; 3];
+    }
+
+    /// [IMPORTANT] This is where we change how the controller's spatial state
+    ///             is controlled.
     /// Integrate controller state over time delta
     pub fn integrate(&mut self, state: &ControllerState, dt: f32) {
-        // Extract normalized inputs
-        let (left_x, left_y) = state.left_stick.normalized();
-        let (_right_x, _right_y) = state.right_stick.normalized();
-        let (_, r2) = state.triggers.normalized();
+        // Natural DualSense axes: X=Right, Y=Forward, Z=Up (Touchpad)
+        let gyro = state.gyroscope.to_rad_per_sec();
+        let accel = state.accelerometer.to_g();
 
-        // Apply deadzone
-        let left_x = apply_deadzone(left_x, self.config.deadzone);
-        let left_y = apply_deadzone(left_y, self.config.deadzone);
-        let r2 = apply_deadzone(r2, self.config.deadzone);
+        // Small deadzone to gyro to reduce drift
+        let gx = if gyro.x.abs() < 0.005 { 0.0 } else { gyro.x };
+        let gy = if gyro.y.abs() < 0.005 { 0.0 } else { gyro.y };
+        let gz = if gyro.z.abs() < 0.005 { 0.0 } else { gyro.z };
 
-        // Apply velocity curve
-        let curved_x = self.config.velocity_curve.apply(left_x);
-        let curved_y = self.config.velocity_curve.apply(left_y);
-        let curved_z = self.config.velocity_curve.apply(r2);
+        // Internal state is Natural (Z-Up)
+        self.angular_velocity = [gx, gy, gz];
+        self.linear_accel = [accel.x, accel.y, accel.z];
 
-        // Map to target velocity (left stick = X/Y planar, R2 = Z)
-        let target_vel = [
-            curved_x * self.config.max_linear_speed,
-            curved_y * self.config.max_linear_speed,
-            curved_z * self.config.max_linear_speed,
-        ];
+        // Update orientation using complementary filter
+        // Assuming the filter expects gravity on the 3rd component (Z)
+        self.orientation_filter
+            .update([gx, gy, gz], [accel.x, accel.y, accel.z], dt);
 
+        // Check for reset buttons
+        if state.buttons.options {
+            self.reset();
+        }
+
+        // Handle specific modes
+        match self.mode {
+            SpatialMode::Standard => {
+                let (lx, ly) = state.left_stick.normalized();
+                let (l2, r2) = state.triggers.normalized();
+
+                let lx = apply_deadzone(lx, self.config.deadzone);
+                let ly = apply_deadzone(ly, self.config.deadzone);
+                let l2 = apply_deadzone(l2, self.config.deadzone);
+                let r2 = apply_deadzone(r2, self.config.deadzone);
+
+                // Natural: X=Right, Y=Forward, Z=Up
+                let target_vel = [
+                    lx * self.config.max_linear_speed,
+                    ly * self.config.max_linear_speed,
+                    (r2 - l2) * self.config.max_linear_speed,
+                ];
+
+                self.update_velocity_and_position(target_vel, dt);
+            }
+            SpatialMode::Heading => {
+                let (l2, r2) = state.triggers.normalized();
+                let l2 = apply_deadzone(l2, self.config.deadzone);
+                let r2 = apply_deadzone(r2, self.config.deadzone);
+
+                // Natural Forward is Y+ [0, 1, 0]
+                let quat = self.orientation_filter.orientation;
+                let forward = quat.rotate_vec3([0.0, 1.0, 0.0]);
+
+                let speed = (r2 - l2) * self.config.max_linear_speed;
+                let target_vel = [
+                    forward[0] * speed,
+                    forward[1] * speed,
+                    forward[2] * speed,
+                ];
+
+                self.update_velocity_and_position(target_vel, dt);
+            }
+            SpatialMode::Accelerometer => {
+                let g_to_mms2 = 9806.65;
+                let quat = self.orientation_filter.orientation;
+
+                // Rotate measured accel to world frame
+                let accel_world = quat.rotate_vec3(self.linear_accel);
+
+                // Subtract gravity (1G on Z+ in Natural Z-Up world)
+                let mut true_accel = [
+                    accel_world[0] * g_to_mms2,
+                    accel_world[1] * g_to_mms2,
+                    (accel_world[2] - 1.0) * g_to_mms2,
+                ];
+
+                let accel_deadzone = 0.08 * g_to_mms2;
+                for i in 0..3 {
+                    if true_accel[i].abs() < accel_deadzone {
+                        true_accel[i] = 0.0;
+                    } else {
+                        true_accel[i] -= true_accel[i].signum() * accel_deadzone;
+                    }
+                }
+
+                for i in 0..3 {
+                    self.velocity[i] += true_accel[i] * dt;
+                    self.velocity[i] *= 0.98; // Aggressive damping for IMU stability
+                    if self.velocity[i].abs() < 5.0 {
+                        self.velocity[i] = 0.0;
+                    }
+                    self.position[i] += self.velocity[i] * dt;
+                }
+            }
+            SpatialMode::AxiDraw => {
+                let (rx, ry) = state.right_stick.normalized();
+                let rx = apply_deadzone(rx, self.config.deadzone);
+                let ry = apply_deadzone(ry, self.config.deadzone);
+
+                let (lx, ly) = state.left_stick.normalized();
+                let lx = apply_deadzone(lx, self.config.deadzone);
+                let ly = apply_deadzone(ly, self.config.deadzone);
+
+                let force_weight = 0.5;
+                let combined_x = rx + lx * force_weight;
+                let combined_y = ry + ly * force_weight;
+
+                let (l2, r2) = state.triggers.normalized();
+                let l2 = apply_deadzone(l2, self.config.deadzone);
+                let r2 = apply_deadzone(r2, self.config.deadzone);
+
+                // Pen Z: R2 lowers (incremental), L2 raises (fast)
+                let z_vel = (r2 * 0.5 - l2 * 2.0) * self.config.max_linear_speed;
+
+                let target_vel = [
+                    combined_x * self.config.max_linear_speed,
+                    combined_y * self.config.max_linear_speed,
+                    z_vel,
+                ];
+
+                if state.buttons.dpad_up { self.axidraw_force_type = 1; }
+                if state.buttons.dpad_down { self.axidraw_force_type = 2; }
+                if state.buttons.dpad_left { self.axidraw_force_type = 3; }
+                if state.buttons.dpad_right { self.axidraw_force_type = 4; }
+
+                self.update_velocity_and_position(target_vel, dt);
+            }
+            SpatialMode::ThreeD => {
+                let (lx, ly) = state.left_stick.normalized();
+                let (l2, r2) = state.triggers.normalized();
+
+                let lx = apply_deadzone(lx, self.config.deadzone);
+                let ly = apply_deadzone(ly, self.config.deadzone);
+                let l2 = apply_deadzone(l2, self.config.deadzone);
+                let r2 = apply_deadzone(r2, self.config.deadzone);
+
+                let quat = self.orientation_filter.orientation;
+                let forward = quat.rotate_vec3([0.0, 1.0, 0.0]);
+                let right = quat.rotate_vec3([1.0, 0.0, 0.0]);
+
+                let move_speed = self.config.max_linear_speed;
+                let target_vel = [
+                    (right[0] * lx + forward[0] * ly) * move_speed,
+                    (right[1] * lx + forward[1] * ly) * move_speed,
+                    (r2 - l2) * move_speed + (right[2] * lx + forward[2] * ly) * move_speed,
+                ];
+
+                self.update_velocity_and_position(target_vel, dt);
+            }
+        }
+
+        // Smooth velocity for output (separate from physics velocity)
+        for i in 0..3 {
+            self.smoothed_velocity[i] = self.smoothed_velocity[i] * 0.8 + self.velocity[i] * 0.2;
+        }
+    }
+
+    fn update_velocity_and_position(&mut self, target_vel: [f32; 3], dt: f32) {
         // Smooth velocity transition (low-pass filter)
         let alpha = self.config.smoothing_alpha;
         for i in 0..3 {
             self.velocity[i] = self.velocity[i] * (1.0 - alpha) + target_vel[i] * alpha;
         }
 
-        // Apply damping when no input (stick released)
-        let has_input = left_x.abs() > 0.0 || left_y.abs() > 0.0 || r2.abs() > 0.0;
+        // Apply damping when no significant input
+        let has_input = target_vel.iter().any(|&v| v.abs() > 0.1);
         if !has_input {
             for i in 0..3 {
                 self.velocity[i] *= self.config.linear_damping;
-            }
-            // Zero out very small velocities
-            for i in 0..3 {
                 if self.velocity[i].abs() < 0.1 {
                     self.velocity[i] = 0.0;
                 }
@@ -200,26 +387,6 @@ impl SpatialState {
         for i in 0..3 {
             self.position[i] += self.velocity[i] * dt;
         }
-
-        // Smooth velocity for output (separate from physics velocity)
-        for i in 0..3 {
-            self.smoothed_velocity[i] =
-                self.smoothed_velocity[i] * 0.8 + self.velocity[i] * 0.2;
-        }
-
-        // Extract IMU data
-        let gyro = state.gyroscope.to_rad_per_sec();
-        let accel = state.accelerometer.to_g();
-
-        self.angular_velocity = [gyro.x, gyro.y, gyro.z];
-        self.linear_accel = [accel.x, accel.y, accel.z];
-
-        // Update orientation using complementary filter
-        self.orientation_filter.update(
-            [gyro.x, gyro.y, gyro.z],
-            [accel.x, accel.y, accel.z],
-            dt,
-        );
     }
 
     /// Get smoothed velocity for output

@@ -310,9 +310,9 @@ impl Renderer {
         let quat = spatial.orientation();
         let model = quaternion_to_matrix(quat.w, quat.x, quat.y, quat.z);
 
-        // For now, use identity view-proj to verify orientation works
-        // The model matrix rotates the box based on controller orientation
-        let view_proj = identity_matrix();
+        // Use a proper view-projection matrix to see the box from a distance
+        let aspect = self.config.width as f32 / self.config.height as f32;
+        let view_proj = create_view_proj_matrix(aspect, 4.0, 0.4, 0.5);
 
         let uniforms = Uniforms { view_proj, model };
         self.queue
@@ -355,10 +355,6 @@ impl Renderer {
             bytemuck::cast_slice(&accel_arrow_vertices),
         );
 
-        // Update uniforms with view-projection and model matrices
-        self.queue
-            .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -382,6 +378,10 @@ impl Renderer {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+
+            // Draw grid for reference
+            render_pass.set_vertex_buffer(0, self.grid_vertex_buffer.slice(..));
+            render_pass.draw(0..self.grid_num_vertices, 0..1);
 
             // Draw controller box with orientation
             render_pass.set_vertex_buffer(0, self.box_vertex_buffer.slice(..));
@@ -410,18 +410,18 @@ impl Renderer {
 
 /// Create a colored box mesh representing the controller
 fn create_box_mesh() -> (Vec<Vertex>, Vec<u16>) {
-    // Controller-like proportions: wider than tall, thin depth
+    // Controller-like proportions: wider than tall, thin depth (laying flat)
     let w = 0.8; // width (X)
-    let h = 0.4; // height (Y)
-    let d = 0.2; // depth (Z)
+    let h = 0.2; // height/thickness (Y)
+    let d = 0.5; // depth (Z)
 
     // Colors for each face (distinct to show orientation)
-    let front_color = [0.2, 0.5, 1.0]; // Blue - front
-    let back_color = [0.3, 0.3, 0.4]; // Gray - back
-    let top_color = [0.1, 0.8, 0.3]; // Green - top
-    let bottom_color = [0.8, 0.2, 0.2]; // Red - bottom
-    let right_color = [0.9, 0.6, 0.1]; // Orange - right
-    let left_color = [0.7, 0.2, 0.8]; // Purple - left
+    let front_color = [0.2, 0.5, 1.0]; // Blue - front (Z+)
+    let back_color = [0.3, 0.3, 0.4]; // Gray - back (Z-)
+    let top_color = [1.0, 1.0, 1.0]; // White - top/touchpad (Y+)
+    let bottom_color = [0.2, 0.2, 0.2]; // Dark Gray - bottom (Y-)
+    let right_color = [0.9, 0.6, 0.1]; // Orange - right (X+)
+    let left_color = [0.7, 0.2, 0.8]; // Purple - left (X-)
 
     let vertices = vec![
         // Front face (Z+)
@@ -617,7 +617,7 @@ fn create_grid_mesh() -> Vec<Vertex> {
     let color = [0.3, 0.3, 0.35];
     let grid_size = 3.0;
     let step = 0.5;
-    let y = -1.5; // Below the controller
+    let y = -2.5; // Below the controller
 
     // Grid lines along X
     let mut x = -grid_size;

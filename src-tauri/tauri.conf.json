@@ -37,9 +37,9 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "DualSense CMD",
-        "width": 1000,
-        "height": 800
+        "title": "DualSense Command",
+        "width": 1400,
+        "height": 600
       }
     ]
   }
