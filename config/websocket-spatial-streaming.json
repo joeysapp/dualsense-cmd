@@ -1,27 +1,27 @@
 {
   "name": "WebSocket Spatial Stream (Integrated Motion)",
-  "poll_rate": 250,
-  "deadzone": 0.08,
+  "poll_rate": 16,
+  "deadzone": 0.10,
   "websocket": {
     "url": "ws://kittenblob.local:9700/spatial",
     "reconnect": true,
     "reconnect_delay_ms": 1000,
     "max_reconnect_attempts": 0,
     "state_format": "{\"type\":\"spatial\",\"ts\":{{timestamp}},\"position\":{\"x\":{{pos_x}},\"y\":{{pos_y}},\"z\":{{pos_z}}},\"velocity\":{\"x\":{{vel_x}},\"y\":{{vel_y}},\"z\":{{vel_z}}},\"orientation\":{\"w\":{{quat_w}},\"x\":{{quat_x}},\"y\":{{quat_y}},\"z\":{{quat_z}}},\"angular_velocity\":{\"x\":{{angvel_x}},\"y\":{{angvel_y}},\"z\":{{angvel_z}}},\"linear_accel\":{\"x\":{{linacc_x}},\"y\":{{linacc_y}},\"z\":{{linacc_z}}},\"buttons\":{{{buttons_json}}}}",
-    "state_interval_ms": 8,
+    "state_interval_ms": 16,
     "binary": false
   },
   "integration": {
     "velocity_curve": "cubic",
-    "max_linear_speed": 200.0,
-    "max_angular_speed": 6.0,
-    "linear_damping": 0.92,
-    "angular_damping": 0.96,
-    "smoothing_alpha": 0.15,
+    "max_linear_speed": 100.0,
+    "max_angular_speed": 150.0,
+    "linear_damping": 0.70,
+    "angular_damping": 0.60,
+    "smoothing_alpha": 0.02,
     "position_units": "mm",
     "orientation_filter": {
       "type": "complementary",
-      "gyro_weight": 0.98
+      "gyro_weight": 0.96
     }
   },
   "mapping": {

@@ -1,13 +1,11 @@
 {
-  "name": "dualsense-cmd-gui",
+  "name": "dualsense-cmd",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.8.3",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri"
+    "dev": "tauri dev",
+    "build": "tauri"
   },
   "dependencies": {
     "@mantine/core": "^7.5.0",
