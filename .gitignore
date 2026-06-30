@@ -1,3 +1,6 @@
+# Node
+node_modules
+
 # Rust
 /target/
 Cargo.lock
@@ -31,6 +34,7 @@ Thumbs.db
 # Build artifacts
 *.tar.gz
 *.zip
+*/target
 
 # Local config overrides
 config/local*.json
@@ -40,3 +44,8 @@ config/local*.json
 
 # Named pipes (legacy)
 ds_pipe
+
+# Images
+*.png
+*.psd
+*.gif
