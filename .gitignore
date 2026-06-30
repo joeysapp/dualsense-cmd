@@ -49,3 +49,6 @@ ds_pipe
 *.png
 *.psd
 *.gif
+
+# Reference submodules
+lib
